@@ -1,8 +1,19 @@
-# Bluetooth HUD
+# Signal Deck · Bluetooth HUD
 
-Painel local de telemetria Bluetooth para Linux, construído sobre BlueZ via D-Bus, FastAPI e WebSocket.
+Painel local de telemetria Bluetooth para Linux, construído sobre BlueZ via D-Bus, FastAPI e WebSocket. O Signal Deck combina intensidade do sinal, presença na rede local, bateria e estado de mídia em uma interface responsiva e atualizada em tempo real.
 
-O objetivo é transformar um dispositivo Bluetooth previamente autorizado em uma fonte de telemetria em tempo real para uma interface local futurista: conexão, RSSI, bateria e estado do player, sem depender de polling agressivo via `bluetoothctl`.
+O objetivo é transformar um dispositivo Bluetooth previamente autorizado em uma fonte de telemetria útil, sem polling agressivo via `bluetoothctl`. A indicação de proximidade é qualitativa: paredes, orientação da antena e interferências alteram o RSSI, então o painel não afirma uma distância física exata.
+
+## O que o painel mostra
+
+- proximidade qualitativa com filtro de mediana, suavização e histerese;
+- tendência de aproximação ou afastamento;
+- histórico recente do RSSI reconstruído ao abrir a página;
+- bateria, conexão, pareamento, confiança e mídia do dispositivo;
+- confirmação independente de presença na mesma rede local;
+- confiança combinada e frescor de cada sensor;
+- reconexão automática do navegador e recuperação do monitor BlueZ;
+- modo de demonstração sem hardware.
 
 ## Stack
 
@@ -59,11 +70,30 @@ Abra:
 http://127.0.0.1:8765
 ```
 
+Para explorar a interface com telemetria simulada:
+
+```text
+http://127.0.0.1:8765/?demo=1
+```
+
 Para outro dispositivo:
 
 ```bash
 BLUETOOTH_DEVICE="AA:BB:CC:DD:EE:FF" bash scripts/run.sh
 ```
+
+### Configuração
+
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `BLUETOOTH_DEVICE` | endereço do protótipo | endereço MAC Bluetooth monitorado |
+| `PHONE_LAN_IP` | descoberta automática | IP do telefone na rede local |
+| `BLUETOOTH_HOST` | `127.0.0.1` | interface em que o painel escuta |
+| `BLUETOOTH_PORT` | `8765` | porta HTTP local |
+| `BLUETOOTH_FAST_RSSI_INTERVAL` | `0.25` | intervalo do leitor HCI, em segundos |
+| `PHONE_LAN_INTERVAL` | `0.50` | intervalo da confirmação LAN, em segundos |
+
+Sem `PHONE_LAN_IP`, o alvo só é escolhido automaticamente quando existe exatamente um vizinho de rede elegível. Isso evita atribuir silenciosamente outro aparelho ao telefone.
 
 ## Arquitetura
 
@@ -75,9 +105,12 @@ Dispositivo Bluetooth
        │ D-Bus signals
        ▼
  BlueZMonitor
-       │
-       ▼
-TelemetryState
+       │                 LanMonitor
+       │                     │
+       └──────────┬──────────┘
+                  │
+                  ▼
+ TelemetryState
        │ WebSocket
        ▼
     FastAPI
@@ -86,7 +119,7 @@ TelemetryState
  Futuristic HUD
 ```
 
-O D-Bus é a fonte principal de eventos. Um snapshot lento é usado apenas para reconciliação de estado.
+O D-Bus é a fonte principal de eventos. Um snapshot lento é usado apenas para reconciliação de estado. Quando disponível, `hcitool rssi` fornece amostras rápidas; controladores que retornam zero repetidamente são descartados e o monitor volta ao RSSI do D-Bus.
 
 ## Endpoints
 
@@ -99,11 +132,10 @@ O D-Bus é a fonte principal de eventos. Um snapshot lento é usado apenas para 
 
 - controles AVRCP: play/pause/next/previous;
 - envio de arquivos via OBEX;
-- histórico e tendência de RSSI;
 - múltiplos dispositivos;
-- modo "find my phone" com indicação de aproximação/afastamento;
-- frontend mais avançado estilo HUD.
+- calibração de proximidade por dispositivo;
+- persistência opcional do histórico.
 
 ## Segurança
 
-O projeto pressupõe dispositivos do próprio usuário já pareados/autorizados. Ele não tenta contornar autenticação, pareamento ou permissões do Android.
+O projeto pressupõe dispositivos do próprio usuário já pareados/autorizados. Ele não tenta contornar autenticação, pareamento ou permissões do Android. Por padrão, o servidor escuta apenas em `127.0.0.1`; ao mudar `BLUETOOTH_HOST`, proteja o acesso à rede porque a interface expõe identificadores e telemetria do aparelho.

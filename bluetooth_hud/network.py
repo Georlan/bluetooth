@@ -45,11 +45,14 @@ class LanMonitor:
                 pass
 
     async def _run_json(self, *args: str) -> Any:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError:
+            return None
         stdout, _ = await proc.communicate()
         if proc.returncode != 0:
             return None

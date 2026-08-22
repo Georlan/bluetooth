@@ -9,7 +9,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .bluez import BlueZMonitor
 from .network import LanMonitor
@@ -23,19 +24,33 @@ class Hub:
     def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
         self.state = TelemetryState(address=os.getenv("BLUETOOTH_DEVICE", DEFAULT_DEVICE))
-        self.monitor = BlueZMonitor(self.state.address, self.state, self.broadcast)
+        self.monitor = self.create_monitor()
         self.lan_monitor = LanMonitor(self.state, self.broadcast)
         self.error: str | None = None
 
+    def create_monitor(self) -> BlueZMonitor:
+        return BlueZMonitor(self.state.address, self.state, self.broadcast)
+
     async def broadcast(self, state: TelemetryState) -> None:
-        payload = json.dumps({"type": "telemetry", "data": state.to_dict()})
-        dead: list[WebSocket] = []
-        for client in tuple(self.clients):
+        await self._broadcast_payload(json.dumps({"type": "telemetry", "data": state.to_dict()}))
+
+    async def broadcast_error(self, message: str) -> None:
+        await self._broadcast_payload(json.dumps({"type": "error", "message": message}))
+
+    async def _broadcast_payload(self, payload: str) -> None:
+        clients = tuple(self.clients)
+
+        async def send(client: WebSocket) -> WebSocket | None:
             try:
-                await client.send_text(payload)
+                await asyncio.wait_for(client.send_text(payload), timeout=1.5)
+                return None
             except Exception:
-                dead.append(client)
+                return client
+
+        dead = await asyncio.gather(*(send(client) for client in clients))
         for client in dead:
+            if client is None:
+                continue
             self.clients.discard(client)
 
     async def send_snapshot(self, client: WebSocket) -> None:
@@ -63,20 +78,39 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 async def _run_monitor() -> None:
-    try:
-        await hub.monitor.start()
-    except Exception as exc:
-        hub.error = str(exc)
-        hub.state.touch("monitor-error")
-        await hub.broadcast(hub.state)
+    retry_delay = 2.0
+    while True:
+        try:
+            await hub.monitor.start()
+            hub.error = None
+            hub.state.monitor_status = "ready"
+            hub.state.touch("monitor-ready")
+            await hub.broadcast(hub.state)
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            hub.error = str(exc)
+            hub.state.monitor_status = "error"
+            hub.state.touch("monitor-error")
+            await hub.broadcast(hub.state)
+            await hub.broadcast_error(hub.error)
+            await hub.monitor.close()
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(30.0, retry_delay * 2)
+            hub.monitor = hub.create_monitor()
 
 
-app = FastAPI(title="Bluetooth HUD", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Bluetooth HUD", version="0.3.0", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+@app.get("/", response_class=FileResponse)
+async def index() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/state")
@@ -87,9 +121,10 @@ async def get_state() -> JSONResponse:
 @app.get("/api/health")
 async def health() -> JSONResponse:
     return JSONResponse({
-        "ok": hub.error is None,
+        "ok": hub.error is None and hub.state.monitor_status == "ready",
         "device": hub.state.address,
         "connected": hub.state.connected,
+        "monitor_status": hub.state.monitor_status,
         "lan_target_ip": hub.state.lan_target_ip,
         "lan_present": hub.state.lan_present,
         "lan_target_mode": hub.state.lan_target_mode,
@@ -104,7 +139,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await hub.send_snapshot(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            message = await websocket.receive_text()
+            if message == "ping":
+                await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
         pass
     finally:

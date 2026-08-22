@@ -19,6 +19,7 @@ _MAX_VALID_RSSI = -1
 class TelemetryState:
     name: str = "Unknown device"
     address: str = ""
+    monitor_status: str = "starting"
     connected: bool = False
     paired: bool = False
     trusted: bool = False
