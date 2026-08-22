@@ -12,6 +12,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .bluez import BlueZMonitor
+from .network import LanMonitor
 from .state import TelemetryState
 
 DEFAULT_DEVICE = "EC:B5:50:2E:16:9C"
@@ -23,6 +24,7 @@ class Hub:
         self.clients: set[WebSocket] = set()
         self.state = TelemetryState(address=os.getenv("BLUETOOTH_DEVICE", DEFAULT_DEVICE))
         self.monitor = BlueZMonitor(self.state.address, self.state, self.broadcast)
+        self.lan_monitor = LanMonitor(self.state, self.broadcast)
         self.error: str | None = None
 
     async def broadcast(self, state: TelemetryState) -> None:
@@ -49,6 +51,7 @@ hub = Hub()
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     del app
     monitor_task = asyncio.create_task(_run_monitor())
+    await hub.lan_monitor.start()
     try:
         yield
     finally:
@@ -56,6 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with contextlib.suppress(asyncio.CancelledError):
             await monitor_task
         await hub.monitor.close()
+        await hub.lan_monitor.close()
 
 
 async def _run_monitor() -> None:
@@ -67,7 +71,7 @@ async def _run_monitor() -> None:
         await hub.broadcast(hub.state)
 
 
-app = FastAPI(title="Bluetooth HUD", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Bluetooth HUD", version="0.2.0", lifespan=lifespan)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -86,6 +90,9 @@ async def health() -> JSONResponse:
         "ok": hub.error is None,
         "device": hub.state.address,
         "connected": hub.state.connected,
+        "lan_target_ip": hub.state.lan_target_ip,
+        "lan_present": hub.state.lan_present,
+        "lan_target_mode": hub.state.lan_target_mode,
         "error": hub.error,
     })
 
