@@ -47,6 +47,16 @@ class TelemetryStateTests(unittest.TestCase):
         self.assertNotIn("_rssi_window", payload)
         self.assertNotIn("_proximity_level", payload)
 
+    def test_lan_presence_sample_is_exposed_without_claiming_distance(self) -> None:
+        state = TelemetryState()
+        state.set_lan_sample("192.168.1.50", True, 4.2)
+        payload = state.to_dict()
+        self.assertEqual(payload["lan_target_ip"], "192.168.1.50")
+        self.assertTrue(payload["lan_present"])
+        self.assertEqual(payload["lan_rtt_ms"], 4.2)
+        self.assertGreater(payload["lan_updated_at"], 0)
+        self.assertNotIn("_lan_sample_times", payload)
+
     def test_update_ignores_unknown_and_private_fields(self) -> None:
         state = TelemetryState()
         state.update(connected=True, battery=80, unknown="ignored", _proximity_level=4)
