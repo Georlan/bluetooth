@@ -7,8 +7,10 @@ from typing import Any
 
 
 _PROXIMITY_LEVELS = ("very_far", "far", "near", "close", "very_close")
-# Boundary to move from level N to N+1, from weak to strong signal.
-_PROXIMITY_BOUNDARIES = (-78.0, -68.0, -58.0, -48.0)
+# Empirical calibration for the current notebook + Samsung A17 pair.
+# User measurements: about -58 dBm when touching the notebook, about -78 dBm at ~2 m.
+# Boundaries are intentionally conservative and use hysteresis below.
+_PROXIMITY_BOUNDARIES = (-82.0, -75.0, -68.0, -62.0)
 
 
 @dataclass(slots=True)
@@ -23,9 +25,12 @@ class TelemetryState:
     rssi_median: float | None = None
     rssi_smooth: float | None = None
     rssi_trend: str = "stable"
+    rssi_trend_slope: float = 0.0
     rssi_samples: int = 0
     rssi_updated_at: float = 0.0
     proximity: str = "unknown"
+    rssi_recent: list[int] = field(default_factory=list)
+    rssi_filtered_recent: list[float] = field(default_factory=list)
     player_status: str | None = None
     player_position_ms: int | None = None
     last_event: str = "boot"
@@ -34,16 +39,17 @@ class TelemetryState:
     _proximity_level: int | None = field(default=None, repr=False)
 
     def set_rssi(self, value: int) -> None:
-        """Filter a noisy RSSI sample and update qualitative proximity.
+        """Filter RSSI and update proximity/trend from a recent reading sequence.
 
         Pipeline:
-        1. Keep the last 5 raw samples.
-        2. Median filter rejects short spikes/outliers.
-        3. Adaptive EMA smooths jitter but reacts faster to sustained movement.
-        4. Hysteresis prevents proximity labels oscillating at zone boundaries.
+        raw -> 5-sample median -> adaptive EMA -> least-squares trend -> hysteresis.
         """
         previous = self.rssi_smooth
         self.rssi = value
+
+        self.rssi_recent.append(value)
+        if len(self.rssi_recent) > 20:
+            del self.rssi_recent[0]
 
         self._rssi_window.append(value)
         if len(self._rssi_window) > 5:
@@ -54,52 +60,62 @@ class TelemetryState:
 
         if previous is None:
             smoothed = filtered
-            trend = "stable"
         else:
-            # Fast enough when the median genuinely moves, conservative on jitter.
             gap = abs(filtered - previous)
-            alpha = 0.52 if gap >= 8.0 else 0.30
+            alpha = 0.50 if gap >= 8.0 else 0.26
             smoothed = alpha * filtered + (1.0 - alpha) * previous
-            delta = smoothed - previous
-            if delta >= 1.5:
-                trend = "approaching"
-            elif delta <= -1.5:
-                trend = "moving_away"
-            else:
-                trend = "stable"
 
         self.rssi_smooth = smoothed
-        self.rssi_trend = trend
+        self.rssi_filtered_recent.append(smoothed)
+        if len(self.rssi_filtered_recent) > 20:
+            del self.rssi_filtered_recent[0]
+
+        slope = self._least_squares_slope(self.rssi_filtered_recent[-8:])
+        self.rssi_trend_slope = slope
+        if slope >= 0.70:
+            self.rssi_trend = "approaching"
+        elif slope <= -0.70:
+            self.rssi_trend = "moving_away"
+        else:
+            self.rssi_trend = "stable"
+
         self.rssi_samples += 1
         self.rssi_updated_at = time()
         self.proximity = self._proximity_with_hysteresis(smoothed)
         self.touch("rssi")
 
     @staticmethod
+    def _least_squares_slope(values: list[float]) -> float:
+        """OLS slope of RSSI versus sample index; positive means getting stronger."""
+        n = len(values)
+        if n < 3:
+            return 0.0
+        mean_x = (n - 1) / 2.0
+        mean_y = sum(values) / n
+        numerator = sum((i - mean_x) * (y - mean_y) for i, y in enumerate(values))
+        denominator = sum((i - mean_x) ** 2 for i in range(n))
+        return numerator / denominator if denominator else 0.0
+
+    @staticmethod
     def _base_proximity_level(rssi: float) -> int:
-        if rssi >= -48:
+        if rssi >= -62:
             return 4
-        if rssi >= -58:
-            return 3
         if rssi >= -68:
+            return 3
+        if rssi >= -75:
             return 2
-        if rssi >= -78:
+        if rssi >= -82:
             return 1
         return 0
 
-    def _proximity_with_hysteresis(self, rssi: float, margin: float = 3.0) -> str:
-        """Return a stable qualitative zone using a +/- dB hysteresis margin."""
+    def _proximity_with_hysteresis(self, rssi: float, margin: float = 2.5) -> str:
         if self._proximity_level is None:
             self._proximity_level = self._base_proximity_level(rssi)
             return _PROXIMITY_LEVELS[self._proximity_level]
 
         level = self._proximity_level
-
-        # Moving closer requires exceeding the next boundary by the margin.
         while level < 4 and rssi >= _PROXIMITY_BOUNDARIES[level] + margin:
             level += 1
-
-        # Moving farther requires falling below the current boundary by the margin.
         while level > 0 and rssi < _PROXIMITY_BOUNDARIES[level - 1] - margin:
             level -= 1
 
