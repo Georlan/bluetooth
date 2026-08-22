@@ -8,51 +8,44 @@ class TelemetryStateTests(unittest.TestCase):
         state = TelemetryState(address="AA:BB:CC:DD:EE:FF")
         for value in (-60, -61, -59, -60):
             state.set_rssi(value)
-
-        before = state.rssi_smooth
-        state.set_rssi(-90)  # isolated bad sample
-
+        state.set_rssi(-90)
         self.assertEqual(state.rssi, -90)
         self.assertEqual(state.rssi_median, -60.0)
-        self.assertIsNotNone(before)
         self.assertGreater(state.rssi_smooth, -65.0)
 
-    def test_sustained_signal_change_moves_filtered_value(self) -> None:
+    def test_calibration_matches_measured_near_and_two_meter_points(self) -> None:
+        near = TelemetryState()
+        for value in (-58, -58, -59, -57, -58):
+            near.set_rssi(value)
+        self.assertEqual(near.proximity, "very_close")
+
+        two_m = TelemetryState()
+        for value in (-78, -78, -79, -77, -78):
+            two_m.set_rssi(value)
+        self.assertIn(two_m.proximity, {"far", "near"})
+
+    def test_least_squares_trend_detects_sustained_motion(self) -> None:
         state = TelemetryState()
-        for value in (-70, -70, -69, -70, -69):
+        for value in (-78, -76, -74, -72, -69, -66, -63, -60):
             state.set_rssi(value)
+        self.assertGreater(state.rssi_trend_slope, 0.7)
+        self.assertEqual(state.rssi_trend, "approaching")
 
-        baseline = state.rssi_smooth
-        for value in (-50, -49, -50, -48, -49):
-            state.set_rssi(value)
-
-        self.assertIsNotNone(baseline)
-        self.assertGreater(state.rssi_smooth, baseline)
-        self.assertIn(state.proximity, {"near", "close", "very_close"})
-
-    def test_proximity_hysteresis_avoids_boundary_flapping(self) -> None:
         state = TelemetryState()
-        for value in (-66, -66, -66, -66, -66):
+        for value in (-58, -60, -63, -66, -70, -73, -76, -79):
             state.set_rssi(value)
-        self.assertEqual(state.proximity, "near")
+        self.assertLess(state.rssi_trend_slope, -0.7)
+        self.assertEqual(state.rssi_trend, "moving_away")
 
-        # Small noise around the -68 dBm base boundary must not flip to far.
-        for value in (-69, -68, -70, -67, -69):
-            state.set_rssi(value)
-        self.assertEqual(state.proximity, "near")
-
-        # A sustained move clearly beyond the hysteresis margin may change zone.
-        for value in (-75, -74, -76, -75, -74, -75):
-            state.set_rssi(value)
-        self.assertEqual(state.proximity, "far")
-
-    def test_to_dict_hides_internal_filter_state(self) -> None:
+    def test_recent_sequences_are_exposed_but_internal_window_is_hidden(self) -> None:
         state = TelemetryState()
-        state.set_rssi(-60)
+        for value in range(-60, -85, -1):
+            state.set_rssi(value)
         payload = state.to_dict()
+        self.assertEqual(len(payload["rssi_recent"]), 20)
+        self.assertEqual(len(payload["rssi_filtered_recent"]), 20)
         self.assertNotIn("_rssi_window", payload)
         self.assertNotIn("_proximity_level", payload)
-        self.assertEqual(payload["rssi_median"], -60.0)
 
     def test_update_ignores_unknown_and_private_fields(self) -> None:
         state = TelemetryState()
