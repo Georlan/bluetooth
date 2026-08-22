@@ -13,6 +13,21 @@ class TelemetryStateTests(unittest.TestCase):
         state.set_rssi(-50, alpha=0.5)
         self.assertEqual(state.rssi, -50)
         self.assertAlmostEqual(state.rssi_smooth, -60.0)
+        self.assertEqual(state.rssi_trend, "approaching")
+        self.assertEqual(state.rssi_samples, 2)
+
+    def test_proximity_is_qualitative(self) -> None:
+        state = TelemetryState()
+        state.set_rssi(-44)
+        self.assertEqual(state.proximity, "very_close")
+
+        state = TelemetryState()
+        state.set_rssi(-63)
+        self.assertEqual(state.proximity, "near")
+
+        state = TelemetryState()
+        state.set_rssi(-84)
+        self.assertEqual(state.proximity, "very_far")
 
     def test_update_ignores_unknown_fields(self) -> None:
         state = TelemetryState()
