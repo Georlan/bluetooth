@@ -147,8 +147,8 @@ a { color: inherit; }
 }
 
 .card::before { content: ""; position: absolute; inset: 0 0 auto; height: 1px; background: linear-gradient(90deg, transparent, rgba(193, 255, 221, .18), transparent); }
-.radar-card, .chart-card, .device-card { min-height: 555px; }
-.radar-card, .chart-card { padding: 26px; }
+.proximity-card, .chart-card, .device-card { min-height: 555px; }
+.proximity-card, .chart-card { padding: 26px; }
 .device-card { padding: 24px; }
 
 .card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
@@ -163,31 +163,20 @@ a { color: inherit; }
 .freshness.is-recent { color: var(--warning); }
 .freshness.is-stale { color: var(--muted); }
 
-.radar-stage { position: relative; width: min(360px, 92%); aspect-ratio: 1; margin: 29px auto 8px; }
-.radar-rings { position: absolute; inset: 0; border: 1px solid rgba(142, 240, 189, .18); border-radius: 50%; background: radial-gradient(circle, rgba(142, 240, 189, .045), transparent 62%); }
-.radar-rings > span { position: absolute; border: 1px solid rgba(142, 240, 189, .115); border-radius: 50%; transform: translate(-50%, -50%); left: 50%; top: 50%; }
-.radar-rings > span:nth-child(1) { width: 76%; height: 76%; }
-.radar-rings > span:nth-child(2) { width: 52%; height: 52%; }
-.radar-rings > span:nth-child(3) { width: 28%; height: 28%; }
-.radar-rings > span:nth-child(4) { width: 5%; height: 5%; border-color: rgba(193, 255, 221, .4); }
-.radar-axis { position: absolute; display: block; background: rgba(142, 240, 189, .08); }
-.axis-x { left: 0; right: 0; top: 50%; height: 1px; }
-.axis-y { top: 0; bottom: 0; left: 50%; width: 1px; }
-.radar-sweep { position: absolute; inset: -1px; border-radius: 50%; background: conic-gradient(from -25deg, transparent 0 315deg, rgba(142, 240, 189, .02) 330deg, rgba(142, 240, 189, .13)); animation: sweep 4.5s linear infinite; }
-@keyframes sweep { to { transform: rotate(360deg); } }
+.proximity-stage { display: flex; min-height: 390px; flex-direction: column; justify-content: center; padding: 54px 0 20px; }
+.proximity-meter { width: 100%; }
+.meter-track { position: relative; height: 15px; border: 1px solid rgba(193, 255, 221, .14); border-radius: 999px; background: linear-gradient(90deg, rgba(142, 240, 189, .72), rgba(142, 240, 189, .25) 38%, rgba(244, 199, 106, .32) 68%, rgba(255, 135, 127, .34)); box-shadow: inset 0 1px 4px rgba(0, 0, 0, .4), 0 0 24px rgba(142, 240, 189, .06); }
+.meter-track::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; background: repeating-linear-gradient(90deg, transparent 0 calc(20% - 1px), rgba(5, 8, 6, .8) calc(20% - 1px) 20%); }
+.meter-marker { position: absolute; z-index: 1; left: 50%; top: 50%; color: var(--mint-bright); transform: translate(-50%, -50%); transition: left .7s cubic-bezier(.2, .8, .2, 1), opacity .25s; }
+.meter-marker i { display: block; width: 18px; height: 18px; border: 3px solid var(--mint-bright); border-radius: 50%; background: var(--surface-strong); box-shadow: 0 0 0 5px rgba(142, 240, 189, .12), 0 0 18px var(--mint); }
+.meter-marker strong { position: absolute; left: 50%; bottom: 23px; max-width: 90px; overflow: hidden; color: var(--text); font: 9px ui-monospace, monospace; letter-spacing: .07em; text-overflow: ellipsis; text-transform: uppercase; transform: translateX(-50%); white-space: nowrap; }
+.meter-marker.is-stale { opacity: .35; }
+.meter-zones { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 14px; color: #60746a; font: 7px ui-monospace, monospace; letter-spacing: .04em; text-align: center; text-transform: uppercase; }
+.meter-zones span:first-child { text-align: left; }
+.meter-zones span:last-child { text-align: right; }
+.meter-hint { max-width: 330px; margin: 25px auto 0; color: var(--muted); font-size: 9px; line-height: 1.55; text-align: center; }
 
-.radar-origin { position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; border-radius: 50%; background: var(--mint-bright); box-shadow: 0 0 16px var(--mint); transform: translate(-50%, -50%); }
-.radar-target { position: absolute; left: 74%; top: 50%; display: flex; flex-direction: row-reverse; align-items: center; gap: 7px; color: var(--mint-bright); font: 9px ui-monospace, monospace; text-transform: uppercase; transform: translate(-100%, -50%); transition: left .65s cubic-bezier(.2, .8, .2, 1), opacity .25s; }
-.radar-target i { position: relative; width: 12px; height: 12px; border: 2px solid var(--mint-bright); border-radius: 50%; box-shadow: 0 0 16px var(--mint); }
-.radar-target i::after { content: ""; position: absolute; inset: -8px; border: 1px solid rgba(142, 240, 189, .35); border-radius: 50%; animation: target-pulse 1.8s ease-out infinite; }
-@keyframes target-pulse { 0% { opacity: .8; transform: scale(.6); } 100% { opacity: 0; transform: scale(1.35); } }
-.radar-target.is-stale { opacity: .35; }
-.radar-target.is-stale i::after { animation: none; }
-.distance-label { position: absolute; color: rgba(127, 148, 137, .72); font: 8px ui-monospace, monospace; letter-spacing: .12em; }
-.label-near { left: 54%; top: 53%; }
-.label-far { right: 3%; top: 53%; }
-
-.signal-reading { display: flex; justify-content: space-between; align-items: end; margin-top: -7px; }
+.signal-reading { display: flex; justify-content: space-between; align-items: end; margin-top: auto; }
 .reading-number { font: 500 clamp(38px, 4vw, 58px)/.9 ui-monospace, monospace; letter-spacing: -.07em; }
 .reading-unit { margin-left: 4px; color: var(--muted); font: 12px ui-monospace, monospace; }
 .trend-pill { padding: 8px 11px; border-radius: 10px; background: rgba(142, 240, 189, .06); color: var(--muted); font-size: 11px; }
@@ -272,7 +261,7 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px
 @media (max-width: 790px) {
   .app-shell { width: min(100% - 26px, 680px); padding-top: 16px; }
   .hero-grid, .details-grid { grid-template-columns: 1fr; }
-  .radar-card, .chart-card { min-height: auto; }
+  .proximity-card, .chart-card { min-height: auto; }
   .device-card, .media-card { grid-column: auto; }
   .device-card { display: flex; min-height: 510px; }
   .device-visual { height: 175px; }
@@ -290,10 +279,11 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px
   .identity strong { font-size: 13px; }
   .topbar-meta { gap: 8px; }
   .connection-badge { padding: 0 9px; }
-  .radar-card, .chart-card, .device-card { padding: 19px; }
+  .proximity-card, .chart-card, .device-card { padding: 19px; }
   .card-heading { flex-direction: column; }
   .card-heading.compact { align-items: flex-start; }
-  .radar-stage { width: 100%; }
+  .proximity-stage { min-height: 365px; }
+  .meter-zones { font-size: 6px; }
   .chart-wrap { height: 230px; margin-top: 24px; }
   footer { flex-direction: column; gap: 7px; }
 }

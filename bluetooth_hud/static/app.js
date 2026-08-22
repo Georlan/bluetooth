@@ -64,12 +64,9 @@ function showNotice(message) {
 
 function hideNotice() { byId("notice").hidden = true; }
 
-function signalToPosition(rssi) {
+function signalToDistancePercent(rssi) {
   const clamped = Math.max(-95, Math.min(-45, rssi ?? -95));
-  const distance = ((-clamped - 45) / 50) * 38 + 8;
-  // RSSI estimates proximity, never direction. Keep the marker on one fixed
-  // radial axis so only a real signal-strength change moves it.
-  return { left: 50 + distance, top: 50 };
+  return ((-clamped - 45) / 50) * 100;
 }
 
 function seedHistory(values) {
@@ -191,12 +188,14 @@ function render(data) {
     trend.className = "trend-pill is-stable";
   }
 
-  const position = signalToPosition(signal);
-  const target = byId("radarTarget");
-  target.style.left = `${position.left}%`;
-  target.style.top = `${position.top}%`;
-  target.classList.toggle("is-stale", !bluetoothFresh);
-  setText("targetLabel", (data.name || "dispositivo").split(" ")[0]);
+  const distancePercent = signalToDistancePercent(signal);
+  const meter = byId("proximityMeter");
+  const marker = byId("proximityMarker");
+  marker.style.left = `${3 + distancePercent * .94}%`;
+  marker.classList.toggle("is-stale", !bluetoothFresh);
+  meter.setAttribute("aria-valuenow", String(Math.round(distancePercent)));
+  meter.setAttribute("aria-valuetext", proximityLabels[data.proximity] || proximityLabels.unknown);
+  setText("markerLabel", (data.name || "dispositivo").split(" ")[0]);
 
   seedHistory(data.rssi_filtered_recent);
   appendHistory(signal, data.rssi_samples ?? 0);

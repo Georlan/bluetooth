@@ -30,19 +30,21 @@
     </section>
 
     <section class="hero-grid" aria-label="Resumo da telemetria">
-      <article class="card radar-card">
+      <article class="card proximity-card">
         <div class="card-heading">
           <div><span class="eyebrow">Proximidade estimada</span><h1 id="proximity">Aguardando sinal</h1></div>
           <span class="freshness is-stale" id="freshness">sem amostras</span>
         </div>
-        <div class="radar-stage">
-          <div class="radar-rings" aria-hidden="true">
-            <span></span><span></span><span></span><span></span>
-            <i class="radar-axis axis-x"></i><i class="radar-axis axis-y"></i><i class="radar-sweep"></i>
+        <div class="proximity-stage">
+          <div class="proximity-meter" id="proximityMeter" role="meter" aria-label="Distância relativa estimada" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="meter-track">
+              <span class="meter-marker is-stale" id="proximityMarker"><i></i><strong id="markerLabel">dispositivo</strong></span>
+            </div>
+            <div class="meter-zones" aria-hidden="true">
+              <span>Muito perto</span><span>Perto</span><span>Na área</span><span>Longe</span><span>Muito longe</span>
+            </div>
           </div>
-          <div class="radar-origin" aria-hidden="true"></div>
-          <div class="radar-target is-stale" id="radarTarget" aria-hidden="true"><i></i><span id="targetLabel">dispositivo</span></div>
-          <span class="distance-label label-near">PERTO</span><span class="distance-label label-far">LONGE</span>
+          <p class="meter-hint">A barra representa apenas distância relativa, calculada pela intensidade do sinal.</p>
         </div>
         <div class="signal-reading">
           <div><span class="reading-number" id="rssi">--</span><span class="reading-unit">dBm</span></div>
