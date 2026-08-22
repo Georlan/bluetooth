@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import re
+import shutil
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -19,6 +22,7 @@ BATTERY = "org.bluez.Battery1"
 MEDIA_PLAYER = "org.bluez.MediaPlayer1"
 
 StateCallback = Callable[[TelemetryState], Awaitable[None]]
+_RSSI_RE = re.compile(r"RSSI return value:\s*(-?\d+)")
 
 
 def _unwrap(values: dict[str, Variant]) -> dict[str, Any]:
@@ -28,10 +32,11 @@ def _unwrap(values: dict[str, Variant]) -> dict[str, Any]:
 class BlueZMonitor:
     """Event-driven monitor for one already-known BlueZ device.
 
-    The monitor installs an explicit discovery filter with the lowest RSSI
-    threshold and duplicate advertising data enabled. Besides making discovery
-    useful for a proximity HUD, this avoids BlueZ's default RSSI delta filtering
-    from making the UI look frozen for long periods.
+    D-Bus remains the source for connection state, battery and media metadata.
+    For RSSI, the monitor prefers a fast HCI link sampler when `hcitool` is
+    available and the device has an active ACL connection. This produces a much
+    denser signal stream than BlueZ discovery notifications. If that path is not
+    available, the monitor transparently falls back to D-Bus RSSI events.
     """
 
     def __init__(self, address: str, state: TelemetryState, on_state: StateCallback) -> None:
@@ -43,8 +48,14 @@ class BlueZMonitor:
         self.device_path: str | None = None
         self.adapter_path: str | None = None
         self._reconcile_task: asyncio.Task[None] | None = None
+        self._fast_rssi_task: asyncio.Task[None] | None = None
         self._closed = False
         self._subscribed_paths: set[str] = set()
+        self._fast_rssi_active = False
+        self._fast_rssi_interval = max(
+            0.10,
+            float(os.getenv("BLUETOOTH_FAST_RSSI_INTERVAL", "0.25")),
+        )
 
     async def start(self) -> None:
         self.bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
@@ -65,14 +76,16 @@ class BlueZMonitor:
         await self._subscribe_existing_children()
         await self._start_discovery()
         await self.refresh()
+        self._fast_rssi_task = asyncio.create_task(self._fast_rssi_loop())
         self._reconcile_task = asyncio.create_task(self._reconcile_loop())
 
     async def close(self) -> None:
         self._closed = True
-        if self._reconcile_task:
-            self._reconcile_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._reconcile_task
+        for task in (self._fast_rssi_task, self._reconcile_task):
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         if self.bus:
             self.bus.disconnect()
 
@@ -105,10 +118,6 @@ class BlueZMonitor:
         obj = self.bus.get_proxy_object(BLUEZ, self.adapter_path, introspection)
         adapter = obj.get_interface(ADAPTER)
 
-        # BlueZ normally applies an RSSI delta threshold during discovery. An
-        # explicit RSSI filter disables that behavior, while DuplicateData asks
-        # BlueZ not to suppress repeated advertising reports. This gives the HUD
-        # a much denser stream of RSSI changes when the controller supports it.
         discovery_filter = {
             "Transport": Variant("s", "auto"),
             "RSSI": Variant("n", -127),
@@ -117,8 +126,6 @@ class BlueZMonitor:
         try:
             await adapter.call_set_discovery_filter(discovery_filter)
         except Exception:
-            # Older BlueZ/controller combinations may reject one of the filter
-            # keys. Discovery still works; it will simply update less often.
             pass
 
         try:
@@ -146,8 +153,8 @@ class BlueZMonitor:
         changed = False
 
         if interface_name == DEVICE:
-            if "RSSI" in values:
-                self.state.set_rssi(int(values["RSSI"]))
+            if "RSSI" in values and not self._fast_rssi_active:
+                self.state.set_rssi(int(values["RSSI"]), source="dbus")
                 changed = True
             mapping = {
                 "Name": "name",
@@ -180,6 +187,48 @@ class BlueZMonitor:
 
         if changed:
             asyncio.create_task(self.on_state(self.state))
+
+    async def _fast_rssi_loop(self) -> None:
+        """Poll controller link RSSI at a practical UI rate when possible."""
+        hcitool = shutil.which("hcitool")
+        if not hcitool:
+            return
+
+        failures = 0
+        while not self._closed:
+            started = asyncio.get_running_loop().time()
+            try:
+                if not self.state.connected:
+                    self._fast_rssi_active = False
+                    failures = 0
+                else:
+                    proc = await asyncio.create_subprocess_exec(
+                        hcitool,
+                        "rssi",
+                        self.address,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
+                    )
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=1.0)
+                    text = stdout.decode(errors="ignore")
+                    match = _RSSI_RE.search(text)
+                    if proc.returncode == 0 and match:
+                        failures = 0
+                        self._fast_rssi_active = True
+                        self.state.set_rssi(int(match.group(1)), source="hci")
+                        await self.on_state(self.state)
+                    else:
+                        failures += 1
+            except (asyncio.TimeoutError, OSError):
+                failures += 1
+
+            # If the connected-link reader repeatedly fails, allow D-Bus RSSI
+            # events back in instead of freezing the signal pipeline.
+            if failures >= 3:
+                self._fast_rssi_active = False
+
+            elapsed = asyncio.get_running_loop().time() - started
+            await asyncio.sleep(max(0.02, self._fast_rssi_interval - elapsed))
 
     def _interfaces_added(self, path: str, interfaces: dict[str, dict[str, Variant]]) -> None:
         device_props = interfaces.get(DEVICE)
