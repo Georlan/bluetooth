@@ -39,6 +39,14 @@ Confirme antes que o telefone esteja conhecido pelo BlueZ:
 bluetoothctl info EC:B5:50:2E:16:9C
 ```
 
+## Testes
+
+Execute a descoberta a partir da pasta `tests`:
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
 ## Execução
 
 ```bash
