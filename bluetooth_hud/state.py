@@ -33,12 +33,20 @@ class TelemetryState:
     proximity: str = "unknown"
     rssi_recent: list[int] = field(default_factory=list)
     rssi_filtered_recent: list[float] = field(default_factory=list)
+    lan_target_ip: str | None = None
+    lan_present: bool = False
+    lan_rtt_ms: float | None = None
+    lan_rate_hz: float = 0.0
+    lan_updated_at: float = 0.0
+    lan_target_mode: str = "none"
+    lan_candidates: list[dict[str, str]] = field(default_factory=list)
     player_status: str | None = None
     player_position_ms: int | None = None
     last_event: str = "boot"
     updated_at: float = 0.0
     _rssi_window: list[int] = field(default_factory=list, repr=False)
     _rssi_sample_times: list[float] = field(default_factory=list, repr=False)
+    _lan_sample_times: list[float] = field(default_factory=list, repr=False)
     _proximity_level: int | None = field(default=None, repr=False)
 
     def set_rssi(self, value: int, source: str = "dbus") -> None:
@@ -97,6 +105,26 @@ class TelemetryState:
         self.proximity = self._proximity_with_hysteresis(smoothed)
         self.touch("rssi")
 
+    def set_lan_sample(self, ip: str | None, present: bool, rtt_ms: float | None) -> None:
+        """Record a LAN presence sample.
+
+        RTT is deliberately not converted into physical distance. It is used as
+        a fast presence/health signal that complements Bluetooth proximity.
+        """
+        now = time()
+        self.lan_target_ip = ip
+        self.lan_present = present
+        self.lan_rtt_ms = rtt_ms
+        self.lan_updated_at = now
+        self._lan_sample_times.append(now)
+        if len(self._lan_sample_times) > 20:
+            del self._lan_sample_times[0]
+        if len(self._lan_sample_times) >= 2:
+            elapsed = self._lan_sample_times[-1] - self._lan_sample_times[0]
+            if elapsed > 0:
+                self.lan_rate_hz = (len(self._lan_sample_times) - 1) / elapsed
+        self.touch("lan")
+
     @staticmethod
     def _least_squares_slope(values: list[float]) -> float:
         """OLS slope of RSSI versus sample index; positive means getting stronger."""
@@ -152,5 +180,6 @@ class TelemetryState:
         data = asdict(self)
         data.pop("_rssi_window", None)
         data.pop("_rssi_sample_times", None)
+        data.pop("_lan_sample_times", None)
         data.pop("_proximity_level", None)
         return data
