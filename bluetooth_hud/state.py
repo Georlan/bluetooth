@@ -9,8 +9,10 @@ from typing import Any
 _PROXIMITY_LEVELS = ("very_far", "far", "near", "close", "very_close")
 # Empirical calibration for the current notebook + Samsung A17 pair.
 # User measurements: about -58 dBm when touching the notebook, about -78 dBm at ~2 m.
-# Boundaries are intentionally conservative and use hysteresis below.
 _PROXIMITY_BOUNDARIES = (-82.0, -75.0, -68.0, -62.0)
+_MAX_SMOOTH_LAG_DB = 4.0
+_MIN_VALID_RSSI = -127
+_MAX_VALID_RSSI = -1
 
 
 @dataclass(slots=True)
@@ -49,12 +51,33 @@ class TelemetryState:
     _lan_sample_times: list[float] = field(default_factory=list, repr=False)
     _proximity_level: int | None = field(default=None, repr=False)
 
-    def set_rssi(self, value: int, source: str = "dbus") -> None:
-        """Filter RSSI and update proximity/trend from a recent reading sequence.
+    def _reset_rssi_filter(self) -> None:
+        self.rssi_median = None
+        self.rssi_smooth = None
+        self.rssi_trend = "stable"
+        self.rssi_trend_slope = 0.0
+        self.rssi_rate_hz = 0.0
+        self.proximity = "unknown"
+        self.rssi_recent.clear()
+        self.rssi_filtered_recent.clear()
+        self._rssi_window.clear()
+        self._rssi_sample_times.clear()
+        self._proximity_level = None
 
-        Pipeline:
-        raw -> 5-sample median -> adaptive EMA -> least-squares trend -> hysteresis.
+    def set_rssi(self, value: int, source: str = "dbus") -> bool:
+        """Filter one RSSI sample and update qualitative proximity.
+
+        Invalid controller values (notably HCI's unusable 0) are rejected.
+        A source switch resets the filter so values from different RSSI scales
+        never contaminate each other. Proximity uses the robust median directly;
+        EMA remains for the visual display and trend calculation.
         """
+        if not _MIN_VALID_RSSI <= value <= _MAX_VALID_RSSI:
+            return False
+
+        if self.rssi_samples and source != self.rssi_source:
+            self._reset_rssi_filter()
+
         previous = self.rssi_smooth
         self.rssi = value
         self.rssi_source = source
@@ -85,6 +108,8 @@ class TelemetryState:
             gap = abs(filtered - previous)
             alpha = 0.50 if gap >= 8.0 else 0.26
             smoothed = alpha * filtered + (1.0 - alpha) * previous
+            # Never let the cosmetic smoother remain many dB behind reality.
+            smoothed = max(filtered - _MAX_SMOOTH_LAG_DB, min(filtered + _MAX_SMOOTH_LAG_DB, smoothed))
 
         self.rssi_smooth = smoothed
         self.rssi_filtered_recent.append(smoothed)
@@ -102,15 +127,13 @@ class TelemetryState:
 
         self.rssi_samples += 1
         self.rssi_updated_at = now
-        self.proximity = self._proximity_with_hysteresis(smoothed)
+        # Median is already spike-resistant and responds faster than the EMA.
+        self.proximity = self._proximity_with_hysteresis(filtered)
         self.touch("rssi")
+        return True
 
     def set_lan_sample(self, ip: str | None, present: bool, rtt_ms: float | None) -> None:
-        """Record a LAN presence sample.
-
-        RTT is deliberately not converted into physical distance. It is used as
-        a fast presence/health signal that complements Bluetooth proximity.
-        """
+        """Record a LAN presence sample without interpreting RTT as distance."""
         now = time()
         self.lan_target_ip = ip
         self.lan_present = present
@@ -127,7 +150,6 @@ class TelemetryState:
 
     @staticmethod
     def _least_squares_slope(values: list[float]) -> float:
-        """OLS slope of RSSI versus sample index; positive means getting stronger."""
         n = len(values)
         if n < 3:
             return 0.0
