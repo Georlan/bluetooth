@@ -13,6 +13,33 @@ class TelemetryStateTests(unittest.TestCase):
         self.assertEqual(state.rssi_median, -60.0)
         self.assertGreater(state.rssi_smooth, -65.0)
 
+    def test_invalid_zero_rssi_is_rejected(self) -> None:
+        state = TelemetryState()
+        self.assertFalse(state.set_rssi(0, source="hci"))
+        self.assertEqual(state.rssi_samples, 0)
+        self.assertIsNone(state.rssi)
+
+    def test_source_switch_resets_filter_history(self) -> None:
+        state = TelemetryState()
+        for value in (-20, -21, -22, -21, -20):
+            state.set_rssi(value, source="hci")
+        state.set_rssi(-65, source="dbus")
+        self.assertEqual(state.rssi_source, "dbus")
+        self.assertEqual(state.rssi_median, -65.0)
+        self.assertEqual(state.rssi_smooth, -65.0)
+        self.assertEqual(state.rssi_recent, [-65])
+
+    def test_proximity_uses_median_not_stale_ema(self) -> None:
+        state = TelemetryState()
+        for value in (-58, -58, -58, -58, -58):
+            state.set_rssi(value)
+        self.assertEqual(state.proximity, "very_close")
+        for value in (-66, -66, -66, -66, -66):
+            state.set_rssi(value)
+        self.assertEqual(state.rssi_median, -66.0)
+        self.assertEqual(state.proximity, "close")
+        self.assertLessEqual(abs(state.rssi_smooth - state.rssi_median), 4.0)
+
     def test_calibration_matches_measured_near_and_two_meter_points(self) -> None:
         near = TelemetryState()
         for value in (-58, -58, -59, -57, -58):
