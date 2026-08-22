@@ -28,6 +28,8 @@ class TelemetryState:
     rssi_trend_slope: float = 0.0
     rssi_samples: int = 0
     rssi_updated_at: float = 0.0
+    rssi_source: str = "dbus"
+    rssi_rate_hz: float = 0.0
     proximity: str = "unknown"
     rssi_recent: list[int] = field(default_factory=list)
     rssi_filtered_recent: list[float] = field(default_factory=list)
@@ -36,9 +38,10 @@ class TelemetryState:
     last_event: str = "boot"
     updated_at: float = 0.0
     _rssi_window: list[int] = field(default_factory=list, repr=False)
+    _rssi_sample_times: list[float] = field(default_factory=list, repr=False)
     _proximity_level: int | None = field(default=None, repr=False)
 
-    def set_rssi(self, value: int) -> None:
+    def set_rssi(self, value: int, source: str = "dbus") -> None:
         """Filter RSSI and update proximity/trend from a recent reading sequence.
 
         Pipeline:
@@ -46,6 +49,16 @@ class TelemetryState:
         """
         previous = self.rssi_smooth
         self.rssi = value
+        self.rssi_source = source
+
+        now = time()
+        self._rssi_sample_times.append(now)
+        if len(self._rssi_sample_times) > 20:
+            del self._rssi_sample_times[0]
+        if len(self._rssi_sample_times) >= 2:
+            elapsed = self._rssi_sample_times[-1] - self._rssi_sample_times[0]
+            if elapsed > 0:
+                self.rssi_rate_hz = (len(self._rssi_sample_times) - 1) / elapsed
 
         self.rssi_recent.append(value)
         if len(self.rssi_recent) > 20:
@@ -80,7 +93,7 @@ class TelemetryState:
             self.rssi_trend = "stable"
 
         self.rssi_samples += 1
-        self.rssi_updated_at = time()
+        self.rssi_updated_at = now
         self.proximity = self._proximity_with_hysteresis(smoothed)
         self.touch("rssi")
 
@@ -138,5 +151,6 @@ class TelemetryState:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data.pop("_rssi_window", None)
+        data.pop("_rssi_sample_times", None)
         data.pop("_proximity_level", None)
         return data
