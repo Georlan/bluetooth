@@ -177,15 +177,15 @@ a { color: inherit; }
 @keyframes sweep { to { transform: rotate(360deg); } }
 
 .radar-origin { position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; border-radius: 50%; background: var(--mint-bright); box-shadow: 0 0 16px var(--mint); transform: translate(-50%, -50%); }
-.radar-target { position: absolute; left: 74%; top: 41%; display: flex; align-items: center; gap: 7px; color: var(--mint-bright); font: 9px ui-monospace, monospace; text-transform: uppercase; transform: translate(-50%, -50%); transition: left .65s cubic-bezier(.2, .8, .2, 1), top .65s cubic-bezier(.2, .8, .2, 1); }
+.radar-target { position: absolute; left: 74%; top: 50%; display: flex; flex-direction: row-reverse; align-items: center; gap: 7px; color: var(--mint-bright); font: 9px ui-monospace, monospace; text-transform: uppercase; transform: translate(-100%, -50%); transition: left .65s cubic-bezier(.2, .8, .2, 1), opacity .25s; }
 .radar-target i { position: relative; width: 12px; height: 12px; border: 2px solid var(--mint-bright); border-radius: 50%; box-shadow: 0 0 16px var(--mint); }
 .radar-target i::after { content: ""; position: absolute; inset: -8px; border: 1px solid rgba(142, 240, 189, .35); border-radius: 50%; animation: target-pulse 1.8s ease-out infinite; }
 @keyframes target-pulse { 0% { opacity: .8; transform: scale(.6); } 100% { opacity: 0; transform: scale(1.35); } }
 .radar-target.is-stale { opacity: .35; }
 .radar-target.is-stale i::after { animation: none; }
 .distance-label { position: absolute; color: rgba(127, 148, 137, .72); font: 8px ui-monospace, monospace; letter-spacing: .12em; }
-.label-near { left: 53%; bottom: 52%; }
-.label-far { right: 2%; top: 54%; }
+.label-near { left: 54%; top: 53%; }
+.label-far { right: 3%; top: 53%; }
 
 .signal-reading { display: flex; justify-content: space-between; align-items: end; margin-top: -7px; }
 .reading-number { font: 500 clamp(38px, 4vw, 58px)/.9 ui-monospace, monospace; letter-spacing: -.07em; }

@@ -6,7 +6,7 @@ O objetivo é transformar um dispositivo Bluetooth previamente autorizado em uma
 
 ## O que o painel mostra
 
-- proximidade qualitativa com filtro de mediana, suavização e histerese;
+- proximidade qualitativa com filtro de mediana, suavização e histerese — sem inventar uma direção que o RSSI não mede;
 - tendência de aproximação ou afastamento;
 - histórico recente do RSSI reconstruído ao abrir a página;
 - bateria, conexão, pareamento, confiança e mídia do dispositivo;

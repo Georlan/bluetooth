@@ -64,11 +64,12 @@ function showNotice(message) {
 
 function hideNotice() { byId("notice").hidden = true; }
 
-function signalToPosition(rssi, sample) {
+function signalToPosition(rssi) {
   const clamped = Math.max(-95, Math.min(-45, rssi ?? -95));
   const distance = ((-clamped - 45) / 50) * 38 + 8;
-  const angle = ((sample || 1) * 47) * Math.PI / 180;
-  return { left: 50 + Math.cos(angle) * distance, top: 50 + Math.sin(angle) * distance };
+  // RSSI estimates proximity, never direction. Keep the marker on one fixed
+  // radial axis so only a real signal-strength change moves it.
+  return { left: 50 + distance, top: 50 };
 }
 
 function seedHistory(values) {
@@ -190,7 +191,7 @@ function render(data) {
     trend.className = "trend-pill is-stable";
   }
 
-  const position = signalToPosition(signal, data.rssi_samples);
+  const position = signalToPosition(signal);
   const target = byId("radarTarget");
   target.style.left = `${position.left}%`;
   target.style.top = `${position.top}%`;
