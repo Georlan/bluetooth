@@ -26,7 +26,13 @@ def _unwrap(values: dict[str, Variant]) -> dict[str, Any]:
 
 
 class BlueZMonitor:
-    """Event-driven monitor for one already-known BlueZ device."""
+    """Event-driven monitor for one already-known BlueZ device.
+
+    The monitor installs an explicit discovery filter with the lowest RSSI
+    threshold and duplicate advertising data enabled. Besides making discovery
+    useful for a proximity HUD, this avoids BlueZ's default RSSI delta filtering
+    from making the UI look frozen for long periods.
+    """
 
     def __init__(self, address: str, state: TelemetryState, on_state: StateCallback) -> None:
         self.address = address.upper()
@@ -94,9 +100,27 @@ class BlueZMonitor:
     async def _start_discovery(self) -> None:
         if not self.adapter_path or not self.bus:
             return
+
         introspection = await self.bus.introspect(BLUEZ, self.adapter_path)
         obj = self.bus.get_proxy_object(BLUEZ, self.adapter_path, introspection)
         adapter = obj.get_interface(ADAPTER)
+
+        # BlueZ normally applies an RSSI delta threshold during discovery. An
+        # explicit RSSI filter disables that behavior, while DuplicateData asks
+        # BlueZ not to suppress repeated advertising reports. This gives the HUD
+        # a much denser stream of RSSI changes when the controller supports it.
+        discovery_filter = {
+            "Transport": Variant("s", "auto"),
+            "RSSI": Variant("n", -127),
+            "DuplicateData": Variant("b", True),
+        }
+        try:
+            await adapter.call_set_discovery_filter(discovery_filter)
+        except Exception:
+            # Older BlueZ/controller combinations may reject one of the filter
+            # keys. Discovery still works; it will simply update less often.
+            pass
+
         try:
             await adapter.call_start_discovery()
         except Exception as exc:
@@ -203,7 +227,7 @@ class BlueZMonitor:
 
     async def _reconcile_loop(self) -> None:
         while not self._closed:
-            await asyncio.sleep(15)
+            await asyncio.sleep(5)
             try:
                 await self.refresh()
             except Exception:
