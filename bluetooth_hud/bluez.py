@@ -33,10 +33,10 @@ class BlueZMonitor:
     """Event-driven monitor for one already-known BlueZ device.
 
     D-Bus remains the source for connection state, battery and media metadata.
-    For RSSI, the monitor prefers a fast HCI link sampler when `hcitool` is
-    available and the device has an active ACL connection. This produces a much
-    denser signal stream than BlueZ discovery notifications. If that path is not
-    available, the monitor transparently falls back to D-Bus RSSI events.
+    For RSSI, the monitor tries a fast HCI link sampler when `hcitool` is
+    available. Some controllers return a constant zero for this command even
+    though discovery RSSI is valid; repeated zero readings are therefore treated
+    as an unusable source and the monitor falls back to calibrated D-Bus RSSI.
     """
 
     def __init__(self, address: str, state: TelemetryState, on_state: StateCallback) -> None:
@@ -52,6 +52,7 @@ class BlueZMonitor:
         self._closed = False
         self._subscribed_paths: set[str] = set()
         self._fast_rssi_active = False
+        self._fast_rssi_disabled = False
         self._fast_rssi_interval = max(
             0.10,
             float(os.getenv("BLUETOOTH_FAST_RSSI_INTERVAL", "0.25")),
@@ -189,18 +190,20 @@ class BlueZMonitor:
             asyncio.create_task(self.on_state(self.state))
 
     async def _fast_rssi_loop(self) -> None:
-        """Poll controller link RSSI at a practical UI rate when possible."""
+        """Try controller link RSSI, but reject adapters that only return zero."""
         hcitool = shutil.which("hcitool")
         if not hcitool:
             return
 
         failures = 0
-        while not self._closed:
+        zero_streak = 0
+        while not self._closed and not self._fast_rssi_disabled:
             started = asyncio.get_running_loop().time()
             try:
                 if not self.state.connected:
                     self._fast_rssi_active = False
                     failures = 0
+                    zero_streak = 0
                 else:
                     proc = await asyncio.create_subprocess_exec(
                         hcitool,
@@ -213,17 +216,31 @@ class BlueZMonitor:
                     text = stdout.decode(errors="ignore")
                     match = _RSSI_RE.search(text)
                     if proc.returncode == 0 and match:
+                        value = int(match.group(1))
                         failures = 0
-                        self._fast_rssi_active = True
-                        self.state.set_rssi(int(match.group(1)), source="hci")
-                        await self.on_state(self.state)
+
+                        # On this notebook/controller pair, `hcitool rssi` returns
+                        # a constant 0 while discovery reports calibrated values
+                        # around -58 .. -78 dBm. Three zeros in a row are enough
+                        # to classify the HCI source as unusable for proximity.
+                        if value == 0:
+                            zero_streak += 1
+                            if zero_streak >= 3:
+                                self._fast_rssi_active = False
+                                self._fast_rssi_disabled = True
+                                self.state.update(rssi_source="dbus")
+                                await self.on_state(self.state)
+                                break
+                        else:
+                            zero_streak = 0
+                            self._fast_rssi_active = True
+                            self.state.set_rssi(value, source="hci")
+                            await self.on_state(self.state)
                     else:
                         failures += 1
             except (asyncio.TimeoutError, OSError):
                 failures += 1
 
-            # If the connected-link reader repeatedly fails, allow D-Bus RSSI
-            # events back in instead of freezing the signal pipeline.
             if failures >= 3:
                 self._fast_rssi_active = False
 
